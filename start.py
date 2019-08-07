@@ -1,12 +1,13 @@
 import datetime
 import pickle
 import os.path
+import re
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
 
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/calendar.readonly']
+SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/calendar.events']
 
 
 def main():
@@ -35,25 +36,23 @@ def main():
     events = get_events(calender_service)
     spam_emails = get_spam_emails(gmail_service)
     bad_results = cross_reference(events, spam_emails)
+    print(spam_emails)
     print(bad_results)
+    delete_events(calender_service, bad_results)
 
 
 def get_events(service):
     email_event_map = dict()
     # Call the Calendar API
-    now = datetime.datetime.utcnow().isoformat() + 'Z' # 'Z' indicates UTC time
-    print('Getting the upcoming 10 events')
+    now = datetime.datetime.utcnow().isoformat() + 'Z'
     events_result = service.events().list(calendarId='primary', timeMin=now,
-                                          maxResults=10, singleEvents=True,
+                                          maxResults=100, singleEvents=True,
                                           orderBy='startTime').execute()
     events = events_result.get('items', [])
 
     if not events:
         print('No upcoming events found.')
     for event in events:
-        start = event['start'].get('dateTime', event['start'].get('date'))
-        print(start, event['summary'], event['creator']['email'], event['id'])
-
         if event['creator']['email'] is not '':
             if event['creator']['email'] not in email_event_map.keys():
                 email_event_map[event['creator']['email']] = []
@@ -71,7 +70,6 @@ def get_spam_emails(service):
     if not messages:
         print('No messages found.')
     else:
-        print('Messages:')
         for message in messages:
             individual_result = service.users().messages().get(userId='me', id=message['id'], format='metadata').execute()
             email = extract_from_email(individual_result)
@@ -87,8 +85,8 @@ def extract_from_email(message):
 
 
 def extract_email_from_header(header_value):
-    # See here https://ctrlq.org/code/19985-parse-email-address
-    return header_value
+    regex = re.compile(r'[^@<\s]+@[^@\s>]+')
+    return regex.findall(header_value)[-1]
 
 
 def cross_reference(events_dict, emails_list):
@@ -99,8 +97,11 @@ def cross_reference(events_dict, emails_list):
     return bad_results
 
 
-def delete_events():
-    pass
+def delete_events(service, events, dry = True):
+    for event in events:
+        if not dry:
+            print("deleting eventId " + event)
+            service.delete(calendarId='primary', eventId=event, sendNotifications=False, sendUpdates=False)
 
 
 if __name__ == '__main__':
