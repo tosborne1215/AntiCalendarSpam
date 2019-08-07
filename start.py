@@ -99,11 +99,13 @@ def cross_reference(events_dict, emails_list):
 
 def delete_events(service, events, dry=False):
     # TODO: https://github.com/googleapis/google-api-python-client/blob/83ead9be84f7e697f8140a77d85eb0ce2eee3538/docs/batch.md
+    batch = service.new_batch_http_request()
     for event in events:
         print("deleting eventId " + event)
         if not dry:
             print("for real")
-            service.events().delete(calendarId='primary', eventId=event, sendNotifications=False, sendUpdates='all').execute()
+            batch.add(service.events().delete(calendarId='primary', eventId=event, sendNotifications=False, sendUpdates='all'))
+    batch.execute()
 
 
 if __name__ == '__main__':
