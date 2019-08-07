@@ -1,4 +1,4 @@
-import datetime
+from datetime import timedelta, datetime
 import pickle
 import os.path
 import re
@@ -7,7 +7,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 
 
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/calendar.events']
+SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/calendar']
 
 
 def main():
@@ -44,9 +44,9 @@ def main():
 def get_events(service):
     email_event_map = dict()
     # Call the Calendar API
-    now = datetime.datetime.utcnow().isoformat() + 'Z'
-    events_result = service.events().list(calendarId='primary', timeMin=now,
-                                          maxResults=100, singleEvents=True,
+    now = datetime.utcnow() - timedelta(days=1)
+    events_result = service.events().list(calendarId='primary', timeMin=now.isoformat() + 'Z',
+                                          maxResults=10, singleEvents=True,
                                           orderBy='startTime').execute()
     events = events_result.get('items', [])
 
@@ -97,11 +97,13 @@ def cross_reference(events_dict, emails_list):
     return bad_results
 
 
-def delete_events(service, events, dry = True):
+def delete_events(service, events, dry=False):
+    # TODO: https://github.com/googleapis/google-api-python-client/blob/83ead9be84f7e697f8140a77d85eb0ce2eee3538/docs/batch.md
     for event in events:
+        print("deleting eventId " + event)
         if not dry:
-            print("deleting eventId " + event)
-            service.delete(calendarId='primary', eventId=event, sendNotifications=False, sendUpdates=False)
+            print("for real")
+            service.events().delete(calendarId='primary', eventId=event, sendNotifications=False, sendUpdates='all').execute()
 
 
 if __name__ == '__main__':
