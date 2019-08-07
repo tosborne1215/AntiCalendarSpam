@@ -8,6 +8,7 @@ from google.auth.transport.requests import Request
 
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/calendar']
+SPAM_EMAIL_ADDRESSES = dict()
 
 
 def main():
@@ -36,6 +37,7 @@ def main():
     events = get_events(calender_service)
     spam_emails = get_spam_emails(gmail_service)
     bad_results = cross_reference(events, spam_emails)
+    print(events)
     print(spam_emails)
     print(bad_results)
     delete_events(calender_service, bad_results)
@@ -45,43 +47,52 @@ def get_events(service):
     email_event_map = dict()
     # Call the Calendar API
     now = datetime.utcnow() - timedelta(days=1)
-    events_result = service.events().list(calendarId='primary', timeMin=now.isoformat() + 'Z',
-                                          maxResults=10, singleEvents=True,
-                                          orderBy='startTime').execute()
+    events_result = service.events().list(calendarId='primary',
+                                          timeMin=now.isoformat() + 'Z',
+                                          maxResults=50).execute()
     events = events_result.get('items', [])
 
     if not events:
         print('No upcoming events found.')
     for event in events:
-        if event['creator']['email'] is not '':
-            if event['creator']['email'] not in email_event_map.keys():
-                email_event_map[event['creator']['email']] = []
-            email_event_map[event['creator']['email']].append(event['id'])
+        try:
+            if event['creator']['email'] is not '':
+                if event['creator']['email'] not in email_event_map.keys():
+                    email_event_map[event['creator']['email']] = []
+                email_event_map[event['creator']['email']].append(event['id'])
+        except:
+            print("This event doesnt have a creator. Which is probably fine.")
+            print(event)
 
     return email_event_map
 
 
 def get_spam_emails(service):
-    emails = dict()
-    # Call the Gmail API
-    results = service.users().messages().list(userId='me', maxResults=25, labelIds='SPAM', includeSpamTrash=True).execute()
+    results = service.users().messages().list(userId='me',
+                                              maxResults=25,
+                                              labelIds='SPAM',
+                                              includeSpamTrash=True).execute()
     messages = results.get('messages', [])
 
     if not messages:
         print('No messages found.')
     else:
+        batch = service.new_batch_http_request(callback=extract_from_email)
         for message in messages:
-            individual_result = service.users().messages().get(userId='me', id=message['id'], format='metadata').execute()
-            email = extract_from_email(individual_result)
-            emails[email] = 0
+            batch.add(service.users().messages().get(userId='me', id=message['id'], format='metadata'))
+        batch.execute()
 
-    return emails.keys()
+    return SPAM_EMAIL_ADDRESSES.keys()
 
 
-def extract_from_email(message):
-    for header in message['payload']['headers']:
+def extract_from_email(request_id, response, exception):
+    if exception is not None:
+        print(request_id + " That request had an issue?" + exception)
+        return
+
+    for header in response['payload']['headers']:
         if header['name'] == 'From':
-            return extract_email_from_header(header['value'])
+            SPAM_EMAIL_ADDRESSES[extract_email_from_header(header['value'])] = 0
 
 
 def extract_email_from_header(header_value):
@@ -98,13 +109,14 @@ def cross_reference(events_dict, emails_list):
 
 
 def delete_events(service, events, dry=False):
-    # TODO: https://github.com/googleapis/google-api-python-client/blob/83ead9be84f7e697f8140a77d85eb0ce2eee3538/docs/batch.md
     batch = service.new_batch_http_request()
     for event in events:
         print("deleting eventId " + event)
         if not dry:
-            print("for real")
-            batch.add(service.events().delete(calendarId='primary', eventId=event, sendNotifications=False, sendUpdates='all'))
+            batch.add(service.events().delete(calendarId='primary',
+                                              eventId=event,
+                                              sendNotifications=False,
+                                              sendUpdates='none'))
     batch.execute()
 
 
